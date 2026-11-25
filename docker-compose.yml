@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: peoplelens
+    ports: ["55432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d peoplelens"]
+      interval: 3s
+      retries: 20
+    volumes: [pgdata:/var/lib/postgresql/data]
+
+  init:  # seeds synthetic data + ingests policies, then exits
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/peoplelens
+    depends_on: {postgres: {condition: service_healthy}}
+    command: sh -c "python -m scripts.seed_data && python -m app.rag.ingest"
+
+  api:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/peoplelens
+    depends_on: {init: {condition: service_completed_successfully}}
+    ports: ["8000:8000"]
+
+  ui:
+    build: .
+    environment:
+      API_URL: http://api:8000
+    depends_on: [api]
+    ports: ["8501:8501"]
+    command: streamlit run ui/streamlit_app.py --server.port 8501 --server.address 0.0.0.0
+
+volumes:
+  pgdata:
