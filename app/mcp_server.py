@@ -1,4 +1,4 @@
-"""People Lens MCP server: leave, attendance and policy tools for any MCP client (Claude Desktop, Claude Code, etc.).
+"""People Lens MCP server: leave, attendance and policy tools for any MCP-compatible client.
 
 The server is a thin, authenticated client of the People Lens API. It holds no database credentials, and every call
 is authorized by the backend under the employee's own identity, exactly like the web app.

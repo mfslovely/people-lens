@@ -51,7 +51,7 @@ Or run everything in Docker: `docker compose up --build` (the API is at :8000 an
 
 New requests notify the approver, and decisions notify the employee. Every action re-checks permissions on the server.
 
-## MCP server (use People Lens from Claude Desktop, Claude Code, or any MCP client)
+## MCP server (use People Lens from any MCP-compatible client)
 
 `app/mcp_server.py` exposes `whoami`, `get_leave_balance`, `apply_leave`, `my_leave_requests`, `check_leave_eligibility`,
 `search_policy`, `notifications`, `check_in`, `check_out`, `pending_approvals` and `decide_leave_request`.
@@ -60,17 +60,8 @@ New requests notify the approver, and decisions notify the employee. Every actio
 appears on the manager's Approvals page and in HR's view. The server is a thin client of the API: start the backend
 first. It never touches the database directly.
 
-Claude Code:
-```bash
-claude mcp add people-lens -e PEOPLELENS_EMPLOYEE_ID=20 -e PYTHONPATH=$PWD -- $PWD/.venv/bin/python -m app.mcp_server
-```
-Claude Desktop (`claude_desktop_config.json`):
-```json
-{"mcpServers": {"people-lens": {
-  "command": "/ABSOLUTE/PATH/people-lens/.venv/bin/python", "args": ["-m", "app.mcp_server"],
-  "env": {"PYTHONPATH": "/ABSOLUTE/PATH/people-lens", "PEOPLELENS_EMPLOYEE_ID": "20",
-          "PEOPLELENS_API_URL": "http://127.0.0.1:8000"}}}}
-```
+Configure your MCP-compatible client to launch `python -m app.mcp_server` over stdio, and provide the environment
+variables below. Use the client's own MCP configuration format; the server is not tied to a particular model provider.
 `PEOPLELENS_EMPLOYEE_ID` signs in as a seeded employee (demo). Use `PEOPLELENS_TOKEN` with a JWT from `/auth/login` instead
 to pass an existing session. `python -m app.mcp_server --http --port 8765` serves streamable HTTP. Clients without
 elicitation support get the same flow in two steps: the tool returns what's missing or a summary, and submits only with

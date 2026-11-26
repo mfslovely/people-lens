@@ -100,7 +100,7 @@ flowchart TB
 ```mermaid
 flowchart LR
   WEB[Web app<br/>Home + agent · My leave · Approvals · All leaves] -->|JWT| API
-  MCPC[MCP client<br/>Claude Desktop / Code] -->|stdio or HTTP| MCPS[app/mcp_server.py<br/>elicitation for type, dates, confirm]
+  MCPC[MCP-compatible client] -->|stdio or HTTP| MCPS[app/mcp_server.py<br/>elicitation for type, dates, confirm]
   MCPS -->|JWT, Idempotency-Key| API
   subgraph API[FastAPI]
     CHAT[/chat → agent/]

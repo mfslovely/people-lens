@@ -26,7 +26,7 @@ def test_provider_selection():
 
 def test_invalid_provider_rejected():
     with pytest.raises(Exception):
-        settings(llm_provider="claude")
+        settings(llm_provider="unsupported_provider")
 
 
 class _Recorder:
