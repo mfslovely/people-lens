@@ -79,6 +79,169 @@ def workforce_stats(ctx: ToolContext, a: StatsArgs):
     raise ValueError("Unsupported metric")
 
 
+class EmployeeDirectoryArgs(BaseModel):
+    department: str | None = Field(None, description="Optional department name filter")
+    status: Literal["active", "on_notice", "inactive", "any"] = "any"
+    search: str | None = Field(None, min_length=2, max_length=100,
+                               description="Optional employee name, code or designation search")
+    limit: int = Field(500, ge=1, le=1000)
+    offset: int = Field(0, ge=0)
+
+
+@tool("get_all_employees",
+      "HR-only organization employee directory. Returns complete employee records with department, designation, manager, "
+      "employment status and application role. Supports filters and pagination; use total_matching to detect more pages.",
+      EmployeeDirectoryArgs, roles={Role.HR_ADMIN})
+def get_all_employees(ctx: ToolContext, a: EmployeeDirectoryArgs):
+    where, params = ["1=1"], []
+    if a.department:
+        where.append("d.name ILIKE %s")
+        params.append(a.department)
+    if a.status != "any":
+        where.append("e.status = %s::hr.employee_status")
+        params.append(a.status)
+    if a.search:
+        where.append("(e.full_name ILIKE %s OR e.emp_code ILIKE %s OR e.designation ILIKE %s)")
+        q = f"%{a.search}%"
+        params.extend([q, q, q])
+    predicate = " AND ".join(where)
+    with tx() as conn:
+        total = conn.execute(
+            f"""SELECT count(*) AS n FROM hr.employees e
+                  JOIN hr.departments d ON d.id=e.department_id
+                  JOIN hr.app_users u ON u.employee_id=e.id WHERE {predicate}""", params).fetchone()["n"]
+        rows = conn.execute(
+            f"""SELECT e.id AS employee_id, e.emp_code, e.full_name AS name, d.name AS department,
+                       e.designation, m.full_name AS manager, e.location, e.joining_date, e.status,
+                       u.role, u.is_active AS login_active
+                  FROM hr.employees e JOIN hr.departments d ON d.id=e.department_id
+                  JOIN hr.app_users u ON u.employee_id=e.id
+                  LEFT JOIN hr.employees m ON m.id=e.manager_id
+                 WHERE {predicate} ORDER BY e.full_name, e.id LIMIT %s OFFSET %s""",
+            (*params, a.limit, a.offset)).fetchall()
+    next_offset = a.offset + len(rows)
+    return {"scope": "organisation", "total_matching": total, "returned": len(rows),
+            "limit": a.limit, "offset": a.offset, "has_more": next_offset < total,
+            "next_offset": next_offset if next_offset < total else None, "employees": rows}
+
+
+class WorkforceSummaryArgs(BaseModel):
+    department: str | None = Field(None, description="Optional department name; omit for the whole organization")
+    lookback_days: int = Field(30, ge=1, le=365,
+                               description="Window for attendance, leave and new-joiner statistics")
+
+
+@tool("generate_workforce_summary",
+      "HR-only deterministic workforce report from live organization data: employment status, department and role headcount, "
+      "new joiners, positions, leave, and attendance for a configurable lookback window.",
+      WorkforceSummaryArgs, roles={Role.HR_ADMIN})
+def generate_workforce_summary(ctx: ToolContext, a: WorkforceSummaryArgs):
+    since = ctx.today - timedelta(days=a.lookback_days - 1)
+    dept = "AND d.name ILIKE %(dept)s" if a.department else ""
+    p = {"dept": a.department, "since": since, "today": ctx.today}
+    with tx() as conn:
+        employee_status = conn.execute(
+            f"""SELECT e.status, count(*) AS employees FROM hr.employees e
+                  JOIN hr.departments d ON d.id=e.department_id WHERE true {dept}
+                  GROUP BY e.status ORDER BY e.status""", p).fetchall()
+        departments = conn.execute(
+            f"""SELECT d.name AS department, count(*) FILTER (WHERE e.status='active') AS active_employees,
+                       count(*) AS total_employees
+                  FROM hr.employees e JOIN hr.departments d ON d.id=e.department_id
+                 WHERE true {dept} GROUP BY d.name ORDER BY active_employees DESC, d.name""", p).fetchall()
+        roles = conn.execute(
+            f"""SELECT u.role, count(*) AS active_users FROM hr.app_users u
+                  JOIN hr.employees e ON e.id=u.employee_id JOIN hr.departments d ON d.id=e.department_id
+                 WHERE u.is_active AND e.status='active' {dept} GROUP BY u.role ORDER BY u.role""", p).fetchall()
+        new_joiners = conn.execute(
+            f"""SELECT count(*) AS n FROM hr.employees e JOIN hr.departments d ON d.id=e.department_id
+                 WHERE e.joining_date BETWEEN %(since)s AND %(today)s {dept}""", p).fetchone()["n"]
+        positions = conn.execute(
+            f"""SELECT p.assignment_status, count(*) AS positions FROM hr.positions p
+                  JOIN hr.departments d ON d.id=p.department_id WHERE true {dept}
+                  GROUP BY p.assignment_status ORDER BY p.assignment_status""", p).fetchall()
+        leave = conn.execute(
+            f"""SELECT r.status, count(*) AS requests, coalesce(sum(r.days),0) AS days
+                  FROM hr.leave_requests r JOIN hr.employees e ON e.id=r.employee_id
+                  JOIN hr.departments d ON d.id=e.department_id
+                 WHERE r.start_date BETWEEN %(since)s AND %(today)s {dept}
+                 GROUP BY r.status ORDER BY r.status""", p).fetchall()
+        attendance = conn.execute(
+            f"""SELECT a.status, count(*) AS records FROM hr.attendance a
+                  JOIN hr.employees e ON e.id=a.employee_id JOIN hr.departments d ON d.id=e.department_id
+                 WHERE a.date BETWEEN %(since)s AND %(today)s {dept}
+                 GROUP BY a.status ORDER BY a.status""", p).fetchall()
+    total = sum(r["employees"] for r in employee_status)
+    active = next((r["employees"] for r in employee_status if r["status"] == "active"), 0)
+    return {"scope": "organisation", "department": a.department or "all", "as_of": ctx.today,
+            "window": {"from": since, "to": ctx.today, "days": a.lookback_days},
+            "headline": {"total_employees": total, "active_employees": active, "new_joiners": new_joiners},
+            "employees_by_status": employee_status, "departments": departments, "active_users_by_role": roles,
+            "positions": positions, "leave_requests": leave, "attendance": attendance}
+
+
+class ApprovalHistoryArgs(BaseModel):
+    request_id: str | None = Field(None, pattern=r"^LR-\d{4}-\d{6}$")
+    employee: str | None = Field(None, min_length=1, max_length=100,
+                                 description="Optional requester name, employee id or employee code")
+    action: Literal["submitted", "approved", "rejected", "escalated", "cancelled", "any"] = "any"
+    start_date: date | None = None
+    end_date: date | None = None
+    limit: int = Field(200, ge=1, le=1000)
+    offset: int = Field(0, ge=0)
+
+
+@tool("get_approval_history",
+      "HR-only organization approval audit history. Returns submitted, approved, rejected, escalated and cancelled events "
+      "with requester, actor, comments, timestamps, trace ids and current request status.",
+      ApprovalHistoryArgs, roles={Role.HR_ADMIN})
+def get_approval_history(ctx: ToolContext, a: ApprovalHistoryArgs):
+    if a.start_date and a.end_date and a.end_date < a.start_date:
+        raise ValueError("end_date must be on or after start_date")
+    where, params = ["1=1"], []
+    if a.request_id:
+        where.append("h.request_id=%s")
+        params.append(a.request_id)
+    if a.employee:
+        ref = a.employee.strip()
+        if ref.isdigit():
+            where.append("r.employee_id=%s")
+            params.append(int(ref))
+        elif ref.upper().startswith("EMP"):
+            where.append("requester.emp_code=upper(%s)")
+            params.append(ref)
+        else:
+            where.append("requester.full_name ILIKE %s")
+            params.append(f"%{ref}%")
+    if a.action != "any":
+        where.append("h.action=%s::hr.approval_action")
+        params.append(a.action)
+    if a.start_date:
+        where.append("h.acted_at::date >= %s")
+        params.append(a.start_date)
+    if a.end_date:
+        where.append("h.acted_at::date <= %s")
+        params.append(a.end_date)
+    predicate = " AND ".join(where)
+    joins = """FROM hr.approval_history h JOIN hr.leave_requests r ON r.id=h.request_id
+               JOIN hr.employees requester ON requester.id=r.employee_id
+               JOIN hr.employees actor ON actor.id=h.actor_id"""
+    with tx() as conn:
+        total = conn.execute(f"SELECT count(*) AS n {joins} WHERE {predicate}", params).fetchone()["n"]
+        rows = conn.execute(
+            f"""SELECT h.id AS history_id, h.request_id, requester.id AS employee_id,
+                       requester.full_name AS employee, actor.id AS actor_id, actor.full_name AS actor,
+                       h.action, h.comment, h.acted_at, h.trace_id, r.leave_type, r.start_date, r.end_date,
+                       r.days, r.status AS current_request_status
+                  {joins} WHERE {predicate}
+                 ORDER BY h.acted_at DESC, h.id DESC LIMIT %s OFFSET %s""",
+            (*params, a.limit, a.offset)).fetchall()
+    next_offset = a.offset + len(rows)
+    return {"scope": "organisation", "total_matching": total, "returned": len(rows),
+            "limit": a.limit, "offset": a.offset, "has_more": next_offset < total,
+            "next_offset": next_offset if next_offset < total else None, "events": rows}
+
+
 class SqlArgs(BaseModel):
     question: str = Field(min_length=5, max_length=500, description="The analytical question in plain English")
 

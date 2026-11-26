@@ -1,9 +1,32 @@
+# Credentials and local configuration
 .env
+.env.*
+!.env.example
+
+# Python environments, caches and local runtimes
 .venv/
+.tools/
 __pycache__/
-*.pyc
+*.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .fastembed_cache/
-eval/results/*.jsonl
-AI_Engineer_Workforce_Assignment.pdf
+
+# Runtime output and temporary files
 .logs/
+tmp/
+output/
+*.log
+python-*.exe
+
+# Evaluation output: commit only the stable review artifacts
+eval/results/*
+!eval/results/latest.md
+!eval/results/metrics_latest.json
+
+# Confidential assignment brief and editor/OS files
+AI_Engineer_Workforce_Assignment.pdf
+.DS_Store
+.idea/
+.vscode/

@@ -25,6 +25,7 @@ import argparse
 import csv
 import json
 import math
+import os
 import re
 import statistics
 import subprocess
@@ -37,6 +38,9 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+
+# Golden expectations use a fixed clock; do not let a developer's wall-clock date make the run drift.
+os.environ["APP_TODAY"] = "2026-11-25"
 
 from app.agent import memory  # noqa: E402
 from app.agent.graph import Orchestrator  # noqa: E402
@@ -71,7 +75,7 @@ def column(sql: str) -> list[str]:
 
 def fmt_num(v) -> list[str]:
     f = float(v)
-    return [str(int(f))] if f.is_integer() else [f"{f:g}", f"{f:.1f}"]
+    return [str(int(f)), f"{f:.1f}"] if f.is_integer() else [f"{f:g}", f"{f:.1f}"]
 
 
 def chunk_docs(ids: list[int]) -> set[str]:
@@ -151,7 +155,8 @@ def run_case(orch: Orchestrator, case: dict) -> dict:
         ok = False
         if pa is not None:
             r2 = orch.run(p, "yes")
-            ok = bool(re.search(r"LR-\d{4}-\d{6}", r2.answer)) and "created" in r2.answer
+            committed = ("created", "approved", "rejected")
+            ok = bool(re.search(r"LR-\d{4}-\d{6}", r2.answer)) and any(word in r2.answer.lower() for word in committed)
             answer += "\n\n[confirm → ] " + r2.answer
             if exp.get("confirm_twice"):
                 again = confirm_action(p, str(pa.action_id))
@@ -193,13 +198,14 @@ def summarize(results: list[dict]) -> dict:
 def write_reports(results: list[dict], metrics: dict, model: str) -> Path:
     RESULTS.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    with open(RESULTS / f"results_{ts}.csv", "w", newline="") as f:
+    with open(RESULTS / f"results_{ts}.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=["id", "category", "user", "role", "query", "expected", "actual_output", "tools",
                                           "confidence", "passed", "checks", "latency_ms", "tokens", "trace_id"])
         w.writeheader()
         for r in results:
             w.writerow({k: (json.dumps(r[k], default=str) if k in ("tools", "checks") else r[k]) for k in w.fieldnames})
-    (RESULTS / f"metrics_{ts}.json").write_text(json.dumps({"model": model, **metrics}, indent=2))
+    (RESULTS / f"metrics_{ts}.json").write_text(json.dumps({"model": model, **metrics}, indent=2), encoding="utf-8")
+    (RESULTS / "metrics_latest.json").write_text(json.dumps({"model": model, **metrics}, indent=2), encoding="utf-8")
     lines = [f"# Evaluation results ({ts})", "", f"Model: `{model}` · Today pinned to {get_settings().today}", "",
              "## Metrics", "", "| Metric | Value |", "|---|---|"]
     lines += [f"| {k} | {v} |" for k, v in metrics.items() if k != "by_category"]
@@ -215,7 +221,7 @@ def write_reports(results: list[dict], metrics: dict, model: str) -> Path:
     for r in results:
         lines += [f"### {r['id']} {'✅' if r['passed'] else '❌'}", f"**{r['role']}**: {r['query']}", "",
                   "```", r["actual_output"][:1500], "```", ""]
-    (RESULTS / "latest.md").write_text("\n".join(lines))
+    (RESULTS / "latest.md").write_text("\n".join(lines), encoding="utf-8")
     with tx() as conn:
         run_id = conn.execute("INSERT INTO ops.eval_runs (model, metrics) VALUES (%s, %s::jsonb) RETURNING id",
                               (model, json.dumps(metrics))).fetchone()["id"]

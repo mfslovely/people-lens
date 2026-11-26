@@ -131,6 +131,11 @@ def main() -> None:
             status = "inactive" if rng.random() < 0.03 else ("on_notice" if rng.random() < 0.02 else "active")
             add(fake.name(), dept, rng.choice(DESIGNATIONS[dept]), mid, joined, status)
 
+        # Keep Arya as a regular employee persona without a misleading HR designation.
+        # The generated identity is deterministic (EMP0082), so normalise the whole reporting profile together.
+        arya = next(e for e in emps if e["full_name"] == "Arya Sunder")
+        arya.update(department_id=6, designation="Operations Analyst", manager_id=managers["Karan Malhotra"])
+
         # Priya's skip-level (Anil, IT head) is on leave today, so escalation can be tested via >5-day requests
         cur.executemany(
             """INSERT INTO hr.employees (id, emp_code, full_name, email, department_id, designation, manager_id,

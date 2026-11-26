@@ -21,12 +21,14 @@ TODAY = date(2026, 11, 25)  # Wednesday
     ("next Monday and Tuesday", "2026-11-30", "2026-12-01"),
     ("next week", "2026-11-30", "2026-12-04"),
     ("tomorrow", "2026-11-26", "2026-11-26"),
+    ("yesterday", "2026-11-24", "2026-11-24"),
     ("Friday", "2026-11-27", "2026-11-27"),
     ("monday to wednesday next week", "2026-11-30", "2026-12-02"),
     ("2026-12-14 to 2026-12-16", "2026-12-14", "2026-12-16"),
     ("3 Dec to 5 Dec", "2026-12-03", "2026-12-05"),
     ("5 Jan", "2027-01-05", "2027-01-05"),
     ("this week", "2026-11-23", "2026-11-27"),
+    ("this month", "2026-11-01", "2026-11-30"),
 ])
 def test_resolve_dates(expr, start, end):
     r = dates.resolve(expr, TODAY)

@@ -64,6 +64,9 @@ def resolve(expression: str, today: date) -> DateRange | None:
             return DateRange(explicit[0], add_working_days(explicit[0], int(m.group(1)) - 1, set()))
         return DateRange(min(explicit), max(explicit))
 
+    if re.search(r"\byesterday\b", text):
+        d = today - timedelta(days=1)
+        return DateRange(d, d)
     if re.search(r"\bday after tomorrow\b", text):
         d = today + timedelta(days=2)
         return DateRange(d, d)
@@ -104,6 +107,10 @@ def resolve(expression: str, today: date) -> DateRange | None:
     if this_week:
         base = week_start(today)
         return DateRange(base, base + timedelta(days=4))
+    if re.search(r"\bthis month\b", text):
+        first = today.replace(day=1)
+        last = (first + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+        return DateRange(first, last)
     if re.search(r"\bnext month\b", text):
         first = (today.replace(day=1) + timedelta(days=32)).replace(day=1)
         last = (first + timedelta(days=32)).replace(day=1) - timedelta(days=1)

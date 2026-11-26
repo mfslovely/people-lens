@@ -36,7 +36,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m app.rag.ingest         # embed and index the policy documents (downloads ~100 MB of local models once)
 
 .venv/bin/uvicorn app.api.main:app --port 8000                 # API, docs at http://localhost:8000/docs
-.venv/bin/streamlit run ui/streamlit_app.py --server.port 8501  # UI at http://localhost:8501
+API_URL=http://127.0.0.1:8000 .venv/bin/uvicorn ui.serve:app --port 8501  # UI at http://localhost:8501
 ```
 
 Or run everything in Docker: `docker compose up --build` (the API is at :8000 and the UI at :8501).
@@ -45,9 +45,9 @@ Or run everything in Docker: `docker compose up --build` (the API is at :8000 an
 
 | Who | Pages |
 |---|---|
-| Everyone | **Assistant**: check in or out, apply for leave (it shows your balance and asks for type and dates), ask policy questions with sources. **Dashboard**: leave balances, your requests and their status, notifications. Check-in and check-out are in the sidebar. |
-| Managers (and any approver) | **Approvals**: pending requests assigned to you, with **Approve** and **Reject** (optional reason) |
-| HR administrators | **All leaves**: org-wide requests (managers included) with filters, plus a per-employee view of balances and history |
+| Everyone | **Home**: the AI agent card (chat, plus Suggestions, Pending, Actions and Insights tabs), a leave balance widget with **Request leave**, today's check-in, and recent requests. **My leave**: balances, requests with status, notifications. Check-in, notifications and Ask AI are in the top bar. |
+| Managers (and any approver) | **Approvals**: pending requests with **Approve** and **Reject** (optional reason), plus an approvals widget on Home |
+| HR administrators | **All leaves**: org metrics and all requests (managers included) with search and filters, plus a **By employee** view of balances and history |
 
 New requests notify the approver, and decisions notify the employee. Every action re-checks permissions on the server.
 
@@ -112,7 +112,7 @@ The evaluation writes `eval/results/latest.md` (metrics and a table of every cas
 | Golden set ≥30 with automated metrics | ✅ 42 cases | `eval/` |
 | Docker deployment, model fallback | ✅ | `docker-compose.yml`, `app/agent/llm.py` |
 | MCP server: balance, interactive apply (elicitation), approvals, check-in, policy | ✅ | `app/mcp_server.py` |
-| Dashboards: employee, manager approvals, HR all leaves; notifications; check-in/out | ✅ | `ui/streamlit_app.py`, `app/api/portal.py` |
+| Dashboards: employee, manager approvals, HR all leaves; notifications; check-in/out | ✅ | `ui/web/` (HTML/CSS/JS), `app/api/portal.py` |
 | Streaming, semantic caching, LLM-judge evaluation | ❌ not implemented | see the design note |
 
 ## Repository layout
@@ -131,5 +131,5 @@ data/policies  synthetic policy documents
 scripts        seed_data.py
 eval           golden.yaml, run_eval.py, results/
 tests          pytest suite
-ui             Streamlit app
+ui             web app: ui/web (HTML/CSS/JS, no build step) served by ui/serve.py
 ```

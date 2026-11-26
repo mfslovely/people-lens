@@ -7,12 +7,12 @@ arrival after 10:15 is flagged as late.
 
 from __future__ import annotations
 
-from datetime import datetime, time
+from datetime import date, datetime, time
 from typing import Literal
 
 from app.agent.models import Principal
 from app.config import get_settings
-from app.core.dates import is_working_day
+from app.core.dates import is_working_day, working_days
 from app.core.leave_rules import PROBATION_DAYS, load_holidays
 from app.db import tx
 
@@ -39,6 +39,56 @@ def today_status(p: Principal) -> dict:
     if leave:
         out["on_leave"] = f"{leave['leave_type']} ({leave['id']})"
     return out
+
+
+def history(p: Principal, start_date: date, end_date: date, as_of: date | None = None) -> dict:
+    """Return the current employee's attendance report for a bounded date range."""
+    if end_date < start_date:
+        raise ValueError("End date must be on or after start date.")
+    if (end_date - start_date).days > 366:
+        raise ValueError("Attendance report range is too long (maximum 366 days).")
+    as_of = as_of or get_settings().today
+    report_end = min(end_date, as_of)
+    if start_date > report_end:
+        raise ValueError("Attendance reports are only available through today.")
+    with tx() as conn:
+        holidays = load_holidays(conn)
+        rows = conn.execute(
+            """SELECT date, status, check_in, check_out FROM hr.attendance
+                 WHERE employee_id=%s AND date BETWEEN %s AND %s ORDER BY date""",
+            (p.employee_id, start_date, report_end),
+        ).fetchall()
+        leave_rows = conn.execute(
+            """SELECT id, leave_type, start_date, end_date FROM hr.leave_requests
+                 WHERE employee_id=%s AND status='approved'
+                   AND daterange(start_date, end_date, '[]') && daterange(%s, %s, '[]')""",
+            (p.employee_id, start_date, report_end),
+        ).fetchall()
+    by_date = {r["date"]: r for r in rows}
+    records = []
+    for day in working_days(start_date, report_end, holidays):
+        record = _row_out(by_date.get(day), day)
+        leave = next((r for r in leave_rows if r["start_date"] <= day <= r["end_date"]), None)
+        if leave and record["status"] == "not_checked_in":
+            record["status"] = "on_leave"
+            record["on_leave"] = f"{leave['leave_type']} ({leave['id']})"
+        records.append(record)
+    counts: dict[str, int] = {}
+    for record in records:
+        counts[record["status"]] = counts.get(record["status"], 0) + 1
+    return {
+        "start_date": start_date,
+        "end_date": report_end,
+        "requested_end_date": end_date,
+        "month_to_date": end_date > report_end,
+        "summary": {
+            "working_days": len(records),
+            "recorded_days": sum(r["status"] != "not_checked_in" for r in records),
+            "late_days": sum(bool(r.get("late")) for r in records),
+            "by_status": counts,
+        },
+        "records": records,
+    }
 
 
 def check_in(p: Principal, mode: Literal["office", "wfh"] = "office", now: datetime | None = None) -> dict:

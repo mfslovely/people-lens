@@ -15,15 +15,15 @@ See also [DESIGN_NOTE.md](DESIGN_NOTE.md) for the reasoning behind each choice a
 | DB + vectors | PostgreSQL 16 + pgvector (HNSW) + `tsvector` | One store for HR data, the knowledge base, memory, actions and telemetry. Transactions make actions idempotent; views and a read-only role enforce scope inside the database |
 | SQL safety | sqlglot AST validation | Allows a single SELECT over allow-listed scoped views only |
 | Analytics | numpy (robust z-score, backtested forecast) | Statistics compute the results; the LLM only explains them |
-| UI | Streamlit | Identity picker, chat, citations, confirm/cancel buttons, trace panel |
+| UI | Static web app (vanilla HTML/CSS/JS, no build step) served by `ui/serve.py` | Sidebar navigation, a top bar with Ask AI, notifications and check-in, the agent card (suggestions, pending, actions, insights), and the leave, approvals and HR pages. It calls the API directly over CORS. Markdown is escaped before rendering |
 | Observability | JSON logs + `ops.traces` / `ops.tool_calls` / `ops.audit_log` | trace id, tools, chunks, authz decisions, latency, tokens, cost, retries, all with PII redacted |
-| Tests / eval | pytest (80 tests, fake LLM) + golden set (42 cases, real LLM) | |
+| Tests / eval | pytest (118 tests, fake LLM) + golden set (42 cases, real LLM) | |
 
 ## System diagram
 
 ```mermaid
 flowchart TB
-  UI[Streamlit UI<br/>identity picker · chat · citations · confirm/cancel] -->|JWT| API
+  UI[Web app<br/>people picker · agent card · dashboards · confirm/cancel] -->|JWT| API
   subgraph API[FastAPI]
     AUTH[auth: JWT carries user id only;<br/>role re-read from DB every request]
     SESS[session ownership check]
@@ -99,7 +99,7 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-  WEB[Streamlit app<br/>Assistant · Dashboard · Approvals · All leaves] -->|JWT| API
+  WEB[Web app<br/>Home + agent · My leave · Approvals · All leaves] -->|JWT| API
   MCPC[MCP client<br/>Claude Desktop / Code] -->|stdio or HTTP| MCPS[app/mcp_server.py<br/>elicitation for type, dates, confirm]
   MCPS -->|JWT, Idempotency-Key| API
   subgraph API[FastAPI]

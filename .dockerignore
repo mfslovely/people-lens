@@ -2,4 +2,13 @@
 .env
 __pycache__
 .git
-eval/results
+.tools
+.logs
+tmp
+output
+*.log
+python-*.exe
+AI_Engineer_Workforce_Assignment.pdf
+eval/results/results_*.csv
+eval/results/metrics_*.json
+!eval/results/metrics_latest.json

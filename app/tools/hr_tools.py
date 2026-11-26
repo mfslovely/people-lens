@@ -360,6 +360,19 @@ def attendance_today_tool(ctx: ToolContext, a: NoArgs):
     return attendance.today_status(ctx.principal)
 
 
+class AttendanceHistoryArgs(BaseModel):
+    start_date: date = Field(description="First date in the report (inclusive)")
+    end_date: date = Field(description="Last date in the report (inclusive)")
+
+
+@tool("attendance_history",
+      "Attendance report for the current user over a date range. Returns working-day records plus totals by status and late days. "
+      "Use resolve_dates first for relative periods such as this month or last month.", AttendanceHistoryArgs)
+def attendance_history_tool(ctx: ToolContext, a: AttendanceHistoryArgs):
+    from app.services import attendance
+    return attendance.history(ctx.principal, a.start_date, a.end_date, as_of=ctx.today)
+
+
 @tool("get_notifications", "The current user's latest notifications (new approval requests, decisions on their leave).", NoArgs)
 def get_notifications_tool(ctx: ToolContext, a: NoArgs):
     from app.services import notifications

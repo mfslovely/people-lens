@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from collections.abc import Callable
 
 import pytest
+
+# Keep seeded dates and assertions deterministic regardless of the wall-clock date.
+os.environ["APP_TODAY"] = "2026-11-25"
 
 from app.agent.llm import LLMReply, LLMUnavailable, ToolCall
 from app.agent.models import Principal, Role

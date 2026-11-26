@@ -58,6 +58,75 @@ def test_hr_sees_org_manager_sees_tree():
     assert hr == total and mgr < hr
 
 
+def test_every_active_hr_admin_gets_organization_wide_department_headcount():
+    with tx() as conn:
+        hr_ids = [r["employee_id"] for r in conn.execute(
+            "SELECT employee_id FROM hr.app_users WHERE role='hr_admin' AND is_active ORDER BY employee_id"
+        ).fetchall()]
+        active_total = conn.execute("SELECT count(*) AS n FROM hr.employees WHERE status='active'").fetchone()["n"]
+    assert hr_ids, "Seed data must include at least one active HR administrator"
+    results = []
+    for employee_id in hr_ids:
+        response = execute(ctx(employee_id), "workforce_stats", {"metric": "headcount_by_department"})
+        assert response.ok, f"HR employee {employee_id} was denied organization analytics: {response.error}"
+        assert response.data["scope"] == "organisation"
+        assert sum(row["active_employees"] for row in response.data["rows"]) == active_total
+        results.append(response.data["rows"])
+    assert all(rows == results[0] for rows in results), "All HR admins must receive the same organization-wide totals"
+
+
+def test_every_active_hr_admin_gets_complete_directory_summary_and_approval_history():
+    with tx() as conn:
+        hr_ids = [r["employee_id"] for r in conn.execute(
+            "SELECT employee_id FROM hr.app_users WHERE role='hr_admin' AND is_active ORDER BY employee_id"
+        ).fetchall()]
+        employee_total = conn.execute("SELECT count(*) AS n FROM hr.employees").fetchone()["n"]
+        approval_total = conn.execute("SELECT count(*) AS n FROM hr.approval_history").fetchone()["n"]
+    assert hr_ids
+    for employee_id in hr_ids:
+        directory = execute(ctx(employee_id), "get_all_employees", {})
+        assert directory.ok, f"HR employee {employee_id} cannot access the employee directory: {directory.error}"
+        assert directory.data["total_matching"] == employee_total
+        assert directory.data["returned"] == employee_total
+
+        summary = execute(ctx(employee_id), "generate_workforce_summary", {"lookback_days": 30})
+        assert summary.ok, f"HR employee {employee_id} cannot generate a workforce summary: {summary.error}"
+        assert summary.data["headline"]["total_employees"] == employee_total
+        assert sum(r["total_employees"] for r in summary.data["departments"]) == employee_total
+        assert summary.data["attendance"]
+
+        history = execute(ctx(employee_id), "get_approval_history", {"limit": 1000})
+        assert history.ok, f"HR employee {employee_id} cannot access approval history: {history.error}"
+        assert history.data["total_matching"] == approval_total
+        events = list(history.data["events"])
+        while history.data["has_more"]:
+            history = execute(ctx(employee_id), "get_approval_history",
+                              {"limit": 1000, "offset": history.data["next_offset"]})
+            assert history.ok
+            events.extend(history.data["events"])
+        assert len(events) == approval_total
+        assert len({event["history_id"] for event in events}) == approval_total
+        assert all(event["request_id"].startswith("LR-") for event in events)
+
+
+@pytest.mark.parametrize("tool", ["get_all_employees", "generate_workforce_summary", "get_approval_history"])
+def test_organization_hr_reporting_tools_are_hr_only(tool):
+    for persona in ("arjun", "priya"):
+        response = execute(ctx(persona), tool, {})
+        assert not response.ok and "not available to the" in response.error
+
+
+def test_arya_sunder_has_a_consistent_non_hr_employee_profile():
+    with tx() as conn:
+        arya = conn.execute(
+            """SELECT e.designation, d.name AS department, m.full_name AS manager, u.role
+                 FROM hr.employees e JOIN hr.departments d ON d.id=e.department_id
+                 JOIN hr.employees m ON m.id=e.manager_id JOIN hr.app_users u ON u.employee_id=e.id
+                WHERE e.full_name='Arya Sunder'""").fetchone()
+    assert arya == {"designation": "Operations Analyst", "department": "Operations",
+                    "manager": "Karan Malhotra", "role": "employee"}
+
+
 def test_list_requests_org_scope_requires_hr():
     r = execute(ctx("priya"), "list_leave_requests", {"scope": "organization"})
     assert not r.ok and "PERMISSION_DENIED" in r.error
@@ -67,6 +136,15 @@ def test_list_requests_org_scope_requires_hr():
 def test_invalid_arguments_are_rejected_before_execution():
     r = execute(ctx("arjun"), "check_leave_eligibility", {"leave_type": "XX", "start_date": "tomorrow"})
     assert not r.ok and r.error.startswith("Invalid arguments")
+
+
+def test_employee_can_get_own_monthly_attendance_report():
+    r = execute(ctx("arjun"), "attendance_history", {"start_date": "2026-11-01", "end_date": "2026-11-30"})
+    assert r.ok
+    assert r.data["start_date"] == "2026-11-01" and r.data["end_date"] == "2026-11-25"
+    assert r.data["month_to_date"] is True
+    assert r.data["summary"]["working_days"] == len(r.data["records"])
+    assert all(row["date"] <= "2026-11-25" for row in r.data["records"])
 
 
 # ------------------------------------------------------------------ eligibility

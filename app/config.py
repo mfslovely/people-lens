@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     history_turns: int = 6
 
     api_url: str = "http://localhost:8000"
+    cors_origins: str = "http://localhost:8501,http://127.0.0.1:8501"
 
     # USD per 1M tokens, used only for cost estimates in traces
     price_in_per_m: float = 3.0

@@ -29,7 +29,7 @@ from app.tools.actions import cancel_action, confirm_action
 setup_logging()
 app = FastAPI(title="People Lens: Workforce AI Assistant", version="1.0.0",
               description="Agentic HR assistant: RAG over policies, scoped data tools, controlled leave actions.")
-app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:8501"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=get_settings().cors_origins.split(","), allow_methods=["*"], allow_headers=["*"])
 
 
 @lru_cache

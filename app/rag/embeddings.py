@@ -1,3 +1,4 @@
+
 """Local embedding and reranking models (fastembed / ONNX). They load lazily and are reused for the life of the process."""
 
 from __future__ import annotations
